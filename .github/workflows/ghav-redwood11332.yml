@@ -1,0 +1,84 @@
+name: GHAV Redwood 11332 before
+
+on:
+  push:
+    branches:
+      - codex/ghav-redwood11332-before
+
+permissions:
+  contents: read
+
+env:
+  YARN_ENABLE_HARDENED_MODE: '0'
+  NX_NO_CLOUD: 'true'
+
+jobs:
+  build-lint-test:
+    name: Build, lint, test / Ubuntu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout pinned Before source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ebf321b94a54f1c4245a6d2c7bd4570b32c9aabe
+          persist-credentials: false
+      - name: Verify source snapshot
+        run: |
+          test "$(git rev-parse HEAD)" = 'ebf321b94a54f1c4245a6d2c7bd4570b32c9aabe'
+          test "$(git rev-parse HEAD^{tree})" = '3c851c5be3c177e03ea79baf4e1af37496b97a30'
+      - name: Set up Node 20.20.2
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20.20.2
+      - name: Enable source Yarn 4.4.0
+        run: |
+          corepack enable
+          test "$(yarn --version)" = '4.4.0'
+      - name: Locate Yarn cache
+        id: yarn-cache-dir
+        run: echo "directory=$(yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      - name: Restore Yarn downloads
+        id: yarn-downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.yarn-cache-dir.outputs.directory }}
+          key: ghav-redwood11332-yarn-cache-${{ runner.os }}-v1
+      - name: Restore Yarn install state
+        id: yarn-install-state
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .yarn/install-state.gz
+          key: ghav-redwood11332-install-${{ runner.os }}-${{ hashFiles('package.json', 'yarn.lock', '.yarnrc.yml') }}
+      - name: Restore node_modules
+        id: yarn-node-modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules
+          key: ghav-redwood11332-modules-${{ runner.os }}-${{ hashFiles('package.json', 'yarn.lock', '.yarnrc.yml') }}
+      - name: Record cache restore state
+        run: |
+          echo "GHAV_YARN_DOWNLOADS_HIT=${{ steps.yarn-downloads.outputs.cache-hit }}"
+          echo "GHAV_YARN_INSTALL_HIT=${{ steps.yarn-install-state.outputs.cache-hit }}"
+          echo "GHAV_YARN_MODULES_HIT=${{ steps.yarn-node-modules.outputs.cache-hit }}"
+      - name: Install complete source dependencies
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          yarn install --inline-builds
+          yarn --cwd packages/create-redwood-rsc-app install --inline-builds
+      - name: Build source packages
+        run: yarn build
+      - name: Lint
+        run: yarn lint
+      - name: Check formatting
+        run: yarn format:check
+      - name: Check packaging and attw
+        run: yarn check:package
+      - name: Test types
+        run: yarn test:types
+      - name: Get available CPU cores
+        id: cpu-cores
+        run: echo "count=$(nproc)" >> "$GITHUB_OUTPUT"
+      - name: Run complete source test task
+        run: yarn test-ci --minWorkers=1 --maxWorkers=${{ steps.cpu-cores.outputs.count }}
